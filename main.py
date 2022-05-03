@@ -1,91 +1,85 @@
-import urllib.request
-import json
-import math
-import matplotlib.pyplot as plt
+import time
+import pygame
+from opensimplex import OpenSimplex
 
-#Denmark
 
-#P1 = [57.272176, 12.775958]
-#P2 = [56.260706, 9.301960]
 
-#Karpaty
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GREY = (100, 100, 100)
 
-P1 = [48.508189, 25.660532]
-P2 = [48.391598, 21.768775]
+fullscreen = False
+size = (800, 800)
+corners = False
+square_size = 20
+weight = 2
+xy_off = 0.2
 
-s = 100
-interval_lat = (P2[0]-P1[0])/s
-interval_lon = (P2[1]-P1[1])/s
+def scale(x):
+    return 1 if x > 0 else 0
 
-lat0=P1[0]
-lon0=P1[1]
+pygame.init()
 
-lat_list=[lat0]
-lon_list=[lon0]
+if fullscreen:
+    screen = pygame.display.set_mode(size=size, flags=pygame.FULLSCREEN)
+else:
+    screen = pygame.display.set_mode(size=size)
 
-for i in range(s):
-    lat_step=lat0+interval_lat
-    lon_step=lon0+interval_lon
-    lon0=lon_step
-    lat0=lat_step
-    lat_list.append(lat_step)
-    lon_list.append(lon_step)
+clock = pygame.time.Clock()
 
-def haversine(lat1,lon1,lat2,lon2):
-    lat1_rad=math.radians(lat1)
-    lat2_rad=math.radians(lat2)
-    lon1_rad=math.radians(lon1)
-    lon2_rad=math.radians(lon2)
-    delta_lat=lat2_rad-lat1_rad
-    delta_lon=lon2_rad-lon1_rad
-    a=math.sqrt((math.sin(delta_lat/2))**2+math.cos(lat1_rad)*math.cos(lat2_rad)*(math.sin(delta_lon/2))**2)
-    d=2*6371000*math.asin(a)
-    return d
+tmp = OpenSimplex()
+z_off = 0
 
-d_list=[]
-for j in range(len(lat_list)):
-    lat_p=lat_list[j]
-    lon_p=lon_list[j]
-    dp=haversine(lat0,lon0,lat_p,lon_p)/1000 #km
-    d_list.append(dp)
-d_list_rev=d_list[::-1]
+running = True
+while running:
+    t1 = time.perf_counter()
+    for event in pygame.event.get():
+        if (
+            event.type == pygame.QUIT
+            or event.type == pygame.KEYDOWN
+            and event.key == pygame.K_ESCAPE
+        ):
+            running = False
 
-d_ar=[{}]*len(lat_list)
-for i in range(len(lat_list)):
-    d_ar[i]={"latitude":lat_list[i],"longitude":lon_list[i]}
-location={"locations":d_ar}
-json_data=json.dumps(location,skipkeys=int).encode('utf8')
+    grid = [[scale(tmp.noise3(x=j * xy_off, y=i * xy_off, z=z_off)) for j in range(size[0] // square_size + 1)] for i in range(size[1] // square_size + 1)]
 
-url="https://api.open-elevation.com/api/v1/lookup"
-response = urllib.request.Request(url,json_data,headers={'Content-Type': 'application/json'})
-fp=urllib.request.urlopen(response)
+    z_off += 0.01
 
-res_byte=fp.read()
-res_str=res_byte.decode("utf8")
-js_str=json.loads(res_str)
-fp.close()
+    screen.fill(GREY)
 
-response_len=len(js_str['results'])
-elev_list=[]
-for j in range(response_len):
-    elev_list.append(js_str['results'][j]['elevation'])
+    if corners:
+        for row_i, row in enumerate(grid):
+            for col_i, cell in enumerate(row):
+                pygame.draw.circle(screen, WHITE if cell == 1 else BLACK, (col_i*square_size, row_i*square_size), weight*2)
 
-mean_elev=round((sum(elev_list)/len(elev_list)),3)
-min_elev=min(elev_list)
-max_elev=max(elev_list)
-distance=d_list_rev[-1]
+    for i in range(len(grid) - 1):
+        for j in range(len(grid[0]) - 1):
+            a = (int(square_size * (j + 0.5)), int(square_size * i))
+            b = (int(square_size * (j + 1)), int(square_size * (i + 0.5)))
+            c = (int(square_size * (j + 0.5)), int(square_size * (i + 1)))
+            d = (int(square_size * j), int(square_size * (i + 0.5)))
 
-base_reg=0
-plt.figure(figsize=(10,4))
-plt.plot(d_list_rev,elev_list)
-plt.plot([0,distance],[min_elev,min_elev],'--g',label='min: '+str(min_elev)+' m')
-plt.plot([0,distance],[max_elev,max_elev],'--r',label='max: '+str(max_elev)+' m')
-plt.plot([0,distance],[mean_elev,mean_elev],'--y',label='ave: '+str(mean_elev)+' m')
-plt.fill_between(d_list_rev,elev_list,base_reg,alpha=0.1)
-plt.text(d_list_rev[0],elev_list[0],"P1")
-plt.text(d_list_rev[-1],elev_list[-1],"P2")
-plt.xlabel("Distance(km)")
-plt.ylabel("Elevation(m)")
-plt.grid()
-plt.legend(fontsize='small')
-plt.show()
+            x = (
+                grid[i][j]
+                + 2 * grid[i][j + 1]
+                + 4 * grid[i + 1][j + 1]
+                + 8 * grid[i + 1][j]
+            )
+            if x in (1, 10, 14):
+                pygame.draw.line(screen, WHITE, a, d, weight)
+            if x in (2, 5, 13): #2 5 13
+                pygame.draw.line(screen, WHITE, a, b, weight)
+            if x in (4, 10, 11): #4 10 11
+                pygame.draw.line(screen, WHITE, b, c, weight)
+            if x in (5, 7, 8): # 5 7 8
+                pygame.draw.line(screen, WHITE, c, d, weight)
+            if x in (3, 12): # 3 12
+                pygame.draw.line(screen, WHITE, b, d, weight)
+            if x in (6, 9): #6 9
+                pygame.draw.line(screen, WHITE, a, c, weight)
+
+    pygame.display.flip()
+    print("FPS:", 1 / (time.perf_counter() - t1))
+    clock.tick(60)
+
+pygame.quit()
